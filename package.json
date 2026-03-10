@@ -1,0 +1,12 @@
+{
+  "name": "hoi-metrics-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for Hoi.in GA4 metrics via Windsor.ai",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
