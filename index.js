@@ -1,11 +1,21 @@
 const https = require("https");
+const http = require("http");
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const TELEGRAM_TOKEN = "8443545096:AAFk0Z6impMy_1rYVkbaLgKOGX_RIKtXUZo";
-const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY; // set in Railway env vars
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 const GA4_ACCOUNT_ID = "514659376";
 const TRIGGER = "metrics today";
+const PORT = process.env.PORT || 3000;
 // ──────────────────────────────────────────────────────────────────────────────
+
+// Keep-alive HTTP server so Railway doesn't sleep the container
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end("Hoi Metrics Bot is alive!");
+}).listen(PORT, () => {
+  console.log(`🌐 Keep-alive server running on port ${PORT}`);
+});
 
 let offset = 0;
 
@@ -14,25 +24,36 @@ function httpsGet(url) {
     https.get(url, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => resolve(JSON.parse(data)));
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(new Error("JSON parse error: " + data.slice(0, 300)));
+        }
+      });
     }).on("error", reject);
   });
 }
 
-function httpsPost(url, payload) {
+function httpsPost(hostname, path, payload) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(payload);
     const options = {
+      hostname,
+      path,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(body),
       },
     };
-    const req = https.request(url, options, (res) => {
+    const req = https.request(options, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => resolve(JSON.parse(data)));
+      res.on("end", () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { resolve({ ok: false, raw: data }); }
+      });
     });
     req.on("error", reject);
     req.write(body);
@@ -40,121 +61,147 @@ function httpsPost(url, payload) {
   });
 }
 
+async function telegramRequest(method, payload) {
+  const result = await httpsPost(
+    "api.telegram.org",
+    `/bot${TELEGRAM_TOKEN}/${method}`,
+    payload
+  );
+  if (!result.ok) {
+    console.error(`❌ Telegram ${method} failed:`, JSON.stringify(result));
+  }
+  return result;
+}
+
 async function getMetrics() {
   const today = new Date().toISOString().split("T")[0];
+  const fields = [
+    "active1_day_users",
+    "active7_day_users",
+    "active28_day_users",
+    "dau_per_mau",
+    "average_session_duration",
+    "newusers",
+    "totalusers",
+    "sessions",
+  ].join(",");
+
   const url =
     `https://connectors.windsor.ai/googleanalytics4` +
     `?api_key=${WINDSOR_API_KEY}` +
     `&account_id=${GA4_ACCOUNT_ID}` +
     `&date_from=${today}` +
     `&date_to=${today}` +
-    `&fields=active1_day_users,active7_day_users,active28_day_users,` +
-    `dau_per_mau,average_session_duration,newusers,totalusers,sessions`;
+    `&fields=${fields}`;
 
-  return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
-      let data = "";
-      res.on("data", (c) => (data += c));
-      res.on("end", () => {
-        try {
-          const json = JSON.parse(data);
-          resolve(json.data?.[0] || json[0] || {});
-        } catch (e) {
-          reject(e);
-        }
-      });
-    }).on("error", reject);
-  });
+  console.log("📡 Fetching Windsor.ai data for", today);
+  const response = await httpsGet(url);
+  console.log("📦 Windsor response:", JSON.stringify(response).slice(0, 300));
+
+  const rows = response?.data || (Array.isArray(response) ? response : null);
+  if (!rows || rows.length === 0) throw new Error("No data from Windsor.ai");
+  return rows[0];
 }
 
-function formatDuration(seconds) {
-  if (!seconds) return "N/A";
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  return `${m}m ${s}s`;
-}
-
-function formatNumber(n) {
-  if (!n) return "N/A";
+function fmt(n) {
+  if (n == null || isNaN(n)) return "N/A";
   return Math.round(n).toLocaleString("en-IN");
 }
 
-function buildMessage(data) {
+function fmtDuration(s) {
+  if (s == null || isNaN(s)) return "N/A";
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+}
+
+function buildMessage(d) {
   const today = new Date().toLocaleDateString("en-IN", {
     day: "numeric", month: "long", year: "numeric",
   });
-
-  const dau = formatNumber(data.active1_day_users);
-  const wau = formatNumber(data.active7_day_users);
-  const mau = formatNumber(data.active28_day_users);
-  const stickiness = data.dau_per_mau
-    ? (data.dau_per_mau * 100).toFixed(2) + "%"
+  const stickiness = d.dau_per_mau != null
+    ? (parseFloat(d.dau_per_mau) * 100).toFixed(2) + "%"
     : "N/A";
-  const avgSession = formatDuration(data.average_session_duration);
-  const newUsers = formatNumber(data.newusers);
-  const totalUsers = formatNumber(data.totalusers);
-  const sessions = formatNumber(data.sessions);
 
-  return (
-    `📊 *Hoi.in v1 — Product Metrics (Today)*\n` +
-    `🗓 _${today}_\n\n` +
-    `👥 *DAU:* ${dau}\n` +
-    `📅 *WAU:* ${wau}\n` +
-    `🗓 *MAU:* ${mau}\n` +
-    `📌 *Stickiness (DAU/MAU):* ${stickiness}\n` +
-    `⏱ *Avg. Session Length:* ${avgSession}\n` +
-    `🆕 *New Users:* ${newUsers}\n` +
-    `👤 *Total Users:* ${totalUsers}\n` +
-    `🔁 *Sessions:* ${sessions}`
-  );
+  return [
+    `📊 *Hoi\\.in v1 — Product Metrics \\(Today\\)*`,
+    `🗓 _${today}_`,
+    ``,
+    `👥 *DAU:* ${fmt(d.active1_day_users)}`,
+    `📅 *WAU:* ${fmt(d.active7_day_users)}`,
+    `🗓 *MAU:* ${fmt(d.active28_day_users)}`,
+    `📌 *Stickiness \\(DAU/MAU\\):* ${stickiness}`,
+    `⏱ *Avg\\. Session Length:* ${fmtDuration(d.average_session_duration)}`,
+    `🆕 *New Users:* ${fmt(d.newusers)}`,
+    `👤 *Total Users:* ${fmt(d.totalusers)}`,
+    `🔁 *Sessions:* ${fmt(d.sessions)}`,
+  ].join("\n");
 }
 
 async function sendMessage(chatId, text) {
-  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
-  await httpsPost(url, {
+  return telegramRequest("sendMessage", {
     chat_id: chatId,
     text,
-    parse_mode: "Markdown",
+    parse_mode: "MarkdownV2",
   });
 }
 
 async function poll() {
   try {
-    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/getUpdates?offset=${offset}&timeout=30`;
-    const result = await httpsGet(url);
+    const result = await telegramRequest("getUpdates", {
+      offset,
+      timeout: 25,
+      allowed_updates: ["message"],
+    });
 
-    for (const update of result.result || []) {
-      offset = update.update_id + 1;
-      const msg = update.message;
-      if (!msg || !msg.text) continue;
+    if (result.ok && result.result?.length > 0) {
+      for (const update of result.result) {
+        offset = update.update_id + 1;
+        const msg = update.message;
+        if (!msg?.text) continue;
 
-      const text = msg.text.toLowerCase().trim();
-      const chatId = msg.chat.id;
+        const text = msg.text.toLowerCase().trim();
+        const chatId = msg.chat.id;
+        console.log(`💬 Message from ${chatId}: "${text}"`);
 
-      if (text === TRIGGER) {
-        await sendMessage(chatId, "⏳ Fetching your metrics...");
-        try {
-          const data = await getMetrics();
-          const reply = buildMessage(data);
-          await sendMessage(chatId, reply);
-        } catch (err) {
-          await sendMessage(chatId, "❌ Failed to fetch metrics. Please try again.");
-          console.error("Metrics error:", err);
+        if (text === TRIGGER) {
+          await sendMessage(chatId, "⏳ Fetching your metrics\\.\\.\\.");
+          try {
+            const data = await getMetrics();
+            await sendMessage(chatId, buildMessage(data));
+            console.log("✅ Metrics sent successfully");
+          } catch (err) {
+            console.error("❌ Metrics fetch error:", err.message);
+            await sendMessage(chatId, "❌ Failed to fetch metrics\\. Please try again\\.");
+          }
+        } else {
+          await sendMessage(
+            chatId,
+            `👋 Send *metrics today* to get today's Hoi\\.in product metrics\\.`
+          );
         }
-      } else {
-        await sendMessage(
-          chatId,
-          `👋 Send *"${TRIGGER}"* to get today's Hoi.in product metrics.`
-        );
       }
     }
   } catch (err) {
-    console.error("Poll error:", err.message);
+    console.error("⚠️ Poll error:", err.message);
+    await new Promise(r => setTimeout(r, 5000)); // wait before retrying on error
   }
 
-  setTimeout(poll, 1000);
+  setImmediate(poll);
 }
 
-console.log("🤖 Hoi Metrics Bot is running...");
+// Startup
+if (!TELEGRAM_TOKEN) { console.error("❌ Missing TELEGRAM_TOKEN"); process.exit(1); }
+if (!WINDSOR_API_KEY) { console.error("❌ Missing WINDSOR_API_KEY"); process.exit(1); }
+
+// Verify bot token on startup
+telegramRequest("getMe", {}).then(res => {
+  if (res.ok) {
+    console.log(`🤖 Bot connected: @${res.result.username}`);
+  } else {
+    console.error("❌ Invalid Telegram token! Check TELEGRAM_TOKEN env var.");
+    process.exit(1);
+  }
+});
+
+console.log(`🚀 Starting Hoi Metrics Bot...`);
 console.log(`📩 Trigger: "${TRIGGER}"`);
 poll();
