@@ -9,41 +9,30 @@ const TRIGGER = "metrics today";
 const PORT = process.env.PORT || 3000;
 // ──────────────────────────────────────────────────────────────────────────────
 
-// Keep-alive HTTP server so Railway doesn't sleep the container
+// Keep-alive HTTP server
 http.createServer((req, res) => {
   res.writeHead(200);
   res.end("Hoi Metrics Bot is alive!");
-}).listen(PORT, () => {
-  console.log(`🌐 Keep-alive server on port ${PORT}`);
-});
+}).listen(PORT, () => console.log(`🌐 Keep-alive server on port ${PORT}`));
 
 let offset = 0;
 
-// Generic HTTPS GET with timeout
-function httpsGet(url, timeoutMs = 15000) {
+function httpsGet(url, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
       let data = "";
-      res.on("data", (chunk) => (data += chunk));
+      res.on("data", (c) => (data += c));
       res.on("end", () => {
-        console.log(`📥 HTTP ${res.statusCode} — ${url.replace(WINDSOR_API_KEY || "", "***").slice(0, 80)}`);
         try { resolve({ status: res.statusCode, body: JSON.parse(data) }); }
-        catch (e) {
-          console.error("❌ JSON parse error. Raw:", data.slice(0, 300));
-          reject(new Error("JSON parse failed: " + data.slice(0, 200)));
-        }
+        catch (e) { reject(new Error("JSON parse failed: " + data.slice(0, 200))); }
       });
     });
-    req.setTimeout(timeoutMs, () => {
-      req.destroy();
-      reject(new Error(`Request timed out after ${timeoutMs}ms`));
-    });
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error("GET timed out")); });
     req.on("error", reject);
   });
 }
 
-// Generic HTTPS POST
-function httpsPost(hostname, path, payload, timeoutMs = 10000) {
+function httpsPost(hostname, path, payload, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(payload);
     const req = https.request(
@@ -67,12 +56,8 @@ function httpsPost(hostname, path, payload, timeoutMs = 10000) {
 }
 
 async function telegramRequest(method, payload) {
-  const result = await httpsPost(
-    "api.telegram.org",
-    `/bot${TELEGRAM_TOKEN}/${method}`,
-    payload
-  );
-  if (!result.ok) console.error(`❌ Telegram ${method} failed:`, JSON.stringify(result).slice(0, 200));
+  const result = await httpsPost("api.telegram.org", `/bot${TELEGRAM_TOKEN}/${method}`, payload);
+  if (!result.ok) console.error(`❌ Telegram ${method} failed:`, JSON.stringify(result).slice(0, 300));
   return result;
 }
 
@@ -83,29 +68,16 @@ async function getMetrics() {
     "dau_per_mau", "average_session_duration", "newusers", "totalusers", "sessions"
   ].join(",");
 
-  // Correct Windsor.ai REST API format per their docs
   const url = `https://connectors.windsor.ai/googleanalytics4` +
-    `?api_key=${WINDSOR_API_KEY}` +
-    `&date_from=${today}` +
-    `&date_to=${today}` +
-    `&fields=${fields}`;
+    `?api_key=${WINDSOR_API_KEY}&date_from=${today}&date_to=${today}&fields=${fields}`;
 
-  console.log(`📡 Windsor URL: ${url.replace(WINDSOR_API_KEY, "***")}`);
+  const { status, body } = await httpsGet(url);
+  if (status !== 200) throw new Error(`Windsor HTTP ${status}`);
 
-  const { status, body } = await httpsGet(url, 20000);
-
-  if (status !== 200) throw new Error(`Windsor returned HTTP ${status}`);
-
-  console.log("📦 Windsor body keys:", Object.keys(body));
-
-  // Windsor returns { data: [...] }
   const rows = body?.data;
-  if (!Array.isArray(rows) || rows.length === 0) {
-    console.error("❌ Unexpected Windsor response:", JSON.stringify(body).slice(0, 300));
-    throw new Error("No data rows returned from Windsor.ai");
-  }
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error("No data from Windsor.ai");
 
-  console.log("✅ Got row:", JSON.stringify(rows[0]));
+  console.log("✅ Windsor data:", JSON.stringify(rows[0]));
   return rows[0];
 }
 
@@ -116,11 +88,12 @@ function fmt(n) {
 
 function fmtDuration(s) {
   if (s == null || s === "" || isNaN(Number(s))) return "N/A";
-  const secs = Number(s);
-  return `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`;
+  const sec = Number(s);
+  return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
 }
 
 function buildMessage(d) {
+  // Use plain text — no MarkdownV2, no escaping issues
   const today = new Date().toLocaleDateString("en-IN", {
     day: "numeric", month: "long", year: "numeric",
   });
@@ -129,30 +102,29 @@ function buildMessage(d) {
     : "N/A";
 
   return [
-    `📊 *Hoi\\.in v1 — Product Metrics \\(Today\\)*`,
-    `🗓 _${today}_`,
+    `📊 Hoi.in v1 — Product Metrics (Today)`,
+    `🗓 ${today}`,
     ``,
-    `👥 *DAU:* ${fmt(d.active1_day_users)}`,
-    `📅 *WAU:* ${fmt(d.active7_day_users)}`,
-    `🗓 *MAU:* ${fmt(d.active28_day_users)}`,
-    `📌 *Stickiness \\(DAU/MAU\\):* ${stickiness}`,
-    `⏱ *Avg\\. Session Length:* ${fmtDuration(d.average_session_duration)}`,
-    `🆕 *New Users:* ${fmt(d.newusers)}`,
-    `👤 *Total Users:* ${fmt(d.totalusers)}`,
-    `🔁 *Sessions:* ${fmt(d.sessions)}`,
+    `👥 DAU: ${fmt(d.active1_day_users)}`,
+    `📅 WAU: ${fmt(d.active7_day_users)}`,
+    `🗓 MAU: ${fmt(d.active28_day_users)}`,
+    `📌 Stickiness (DAU/MAU): ${stickiness}`,
+    `⏱ Avg. Session Length: ${fmtDuration(d.average_session_duration)}`,
+    `🆕 New Users: ${fmt(d.newusers)}`,
+    `👤 Total Users: ${fmt(d.totalusers)}`,
+    `🔁 Sessions: ${fmt(d.sessions)}`,
   ].join("\n");
 }
 
 async function sendMessage(chatId, text) {
-  return telegramRequest("sendMessage", {
-    chat_id: chatId, text, parse_mode: "MarkdownV2",
-  });
+  // Plain text — no parse_mode, zero formatting issues
+  return telegramRequest("sendMessage", { chat_id: chatId, text });
 }
 
 async function poll() {
   try {
     const result = await telegramRequest("getUpdates", {
-      offset, timeout: 25, allowed_updates: ["message"],
+      offset, timeout: 20, allowed_updates: ["message"],
     });
 
     if (result.ok && result.result?.length > 0) {
@@ -166,19 +138,17 @@ async function poll() {
         console.log(`💬 [${chatId}]: "${text}"`);
 
         if (text === TRIGGER) {
-          await sendMessage(chatId, "⏳ Fetching your metrics\\.\\.\\.");
+          await sendMessage(chatId, "⏳ Fetching your metrics...");
           try {
             const data = await getMetrics();
             await sendMessage(chatId, buildMessage(data));
             console.log("✅ Metrics sent!");
           } catch (err) {
             console.error("❌ Metrics error:", err.message);
-            await sendMessage(chatId, `❌ Error: ${err.message.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&")}`);
+            await sendMessage(chatId, `❌ Error: ${err.message}`);
           }
         } else {
-          await sendMessage(chatId,
-            `👋 Send *metrics today* to get today's Hoi\\.in product metrics\\.`
-          );
+          await sendMessage(chatId, `👋 Send "metrics today" to get today's Hoi.in product metrics.`);
         }
       }
     }
@@ -189,7 +159,6 @@ async function poll() {
   setImmediate(poll);
 }
 
-// Startup checks
 if (!TELEGRAM_TOKEN) { console.error("❌ Missing TELEGRAM_TOKEN"); process.exit(1); }
 if (!WINDSOR_API_KEY) { console.error("❌ Missing WINDSOR_API_KEY"); process.exit(1); }
 
@@ -198,5 +167,5 @@ telegramRequest("getMe", {}).then(res => {
   else { console.error("❌ Invalid Telegram token!"); process.exit(1); }
 });
 
-console.log(`🚀 Starting Hoi Metrics Bot... Trigger: "${TRIGGER}"`);
+console.log(`🚀 Hoi Metrics Bot starting... Trigger: "${TRIGGER}"`);
 poll();
