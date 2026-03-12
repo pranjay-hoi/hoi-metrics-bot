@@ -23,7 +23,6 @@ const METRICS_FIELDS = [
   "dau_per_mau",              // Stickiness ratio
   "average_session_duration", // Avg session length
   "newusers",                 // New users
-  "totalusers",               // Total users
   "sessions",                 // Sessions
   "engagement_rate",          // Engagement rate
   "bounce_rate",              // Bounce rate
@@ -127,16 +126,15 @@ function buildMessage(d, label) {
   return [
     `📊 Hoi.in v1 — Product Metrics (${label})`,
     `━━━━━━━━━━━━━━━━━━━━`,
-    `👥 DAU:              ${fmt(d.active1_day_users)}`,
-    `📅 WAU:              ${fmt(d.active7_day_users)}`,
-    `🗓  MAU:              ${fmt(d.active28_day_users)}`,
-    `📌 Stickiness:       ${stickiness}`,
-    `⏱  Avg Session:      ${fmtDuration(d.average_session_duration)}`,
-    `🆕 New Users:        ${fmt(d.newusers)}`,
-    `👤 Total Users:      ${fmt(d.totalusers)}`,
-    `🔁 Sessions:         ${fmt(d.sessions)}`,
-    `💡 Engagement Rate:  ${fmtPercent(d.engagement_rate)}`,
-    `↩️  Bounce Rate:      ${fmtPercent(d.bounce_rate)}`,
+    `👥 DAU: ${fmt(d.active1_day_users)}`,
+    `📅 WAU: ${fmt(d.active7_day_users)}`,
+    `🗓 MAU: ${fmt(d.active28_day_users)}`,
+    `📌 Daily Return User%: ${stickiness}`,
+    `⏱ Avg Session: ${fmtDuration(d.average_session_duration)}`,
+    `🆕 New Users: ${fmt(d.newusers)}`,
+    `🔁 Sessions: ${fmt(d.sessions)}`,
+    `💡 Engagement Rate: ${fmtPercent(d.engagement_rate)}`,
+    `↩️  Bounce Rate: ${fmtPercent(d.bounce_rate)}`,
     `━━━━━━━━━━━━━━━━━━━━`,
   ].join("\n");
 }
