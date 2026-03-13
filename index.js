@@ -17,7 +17,7 @@ const PORT = process.env.PORT || 3000;
 // Add or remove fields here to customize your report.
 // Full list of available fields: https://docs.windsor.ai
 const METRICS_FIELDS = [
-  "active_day_users",        // DAU
+  "active1_day_users",        // DAU
   "active7_day_users",        // WAU
   "active28_day_users",       // MAU
   "dau_per_mau",              // Stickiness ratio
@@ -126,7 +126,7 @@ function buildMessage(d, label) {
   return [
     `📊 Hoi.in v1 — Product Metrics (${label})`,
     `━━━━━━━━━━━━━━━━━━━━`,
-    `👥 DAU: ${fmt(d.active_day_users)}`,
+    `👥 DAU: ${fmt(d.active1_day_users)}`,
     `📅 WAU: ${fmt(d.active7_day_users)}`,
     `🗓 MAU: ${fmt(d.active28_day_users)}`,
     `📌 Daily Return User%: ${stickiness}`,
