@@ -23,6 +23,8 @@ const METRICS_FIELDS = [
   "average_session_duration", // Avg session length
   "newusers",                 // New users
   "engagement_rate",          // Engagement rate
+  "conversions_v1_lms_add_card_success", // Lounge card added successfully
+  "conversions_purchase",  // Lounge booking success
 ];
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -129,6 +131,8 @@ function buildMessage(d, label) {
     `⏱ Avg Session: ${fmtDuration(d.average_session_duration)}`,
     `🆕 New Users: ${fmt(d.newusers)}`,
     `💡 Engagement Rate: ${fmtPercent(d.engagement_rate)}`,
+    `💳 Lounge Add Card Success:   ${fmt(d.conversions_v1_lms_add_card_success)}`,
+    `🛋️ Lounge Booking Success:    ${fmt(d.conversions_purchase)}`,
     `━━━━━━━━━━━━━━━━━━━━`,
   ].join("\n");
 }
