@@ -18,14 +18,11 @@ const PORT = process.env.PORT || 3000;
 // Full list of available fields: https://docs.windsor.ai
 const METRICS_FIELDS = [
   "active1_day_users",        // DAU
-  "active7_day_users",        // WAU
   "active28_day_users",       // MAU
   "dau_per_mau",              // Stickiness ratio
   "average_session_duration", // Avg session length
   "newusers",                 // New users
-  "sessions",                 // Sessions
   "engagement_rate",          // Engagement rate
-  "bounce_rate",              // Bounce rate
 ];
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -127,14 +124,11 @@ function buildMessage(d, label) {
     `📊 Hoi.in v1 — Product Metrics (${label})`,
     `━━━━━━━━━━━━━━━━━━━━`,
     `👥 DAU: ${fmt(d.active1_day_users)}`,
-    `📅 WAU: ${fmt(d.active7_day_users)}`,
     `🗓 MAU: ${fmt(d.active28_day_users)}`,
     `📌 Daily Return User%: ${stickiness}`,
     `⏱ Avg Session: ${fmtDuration(d.average_session_duration)}`,
     `🆕 New Users: ${fmt(d.newusers)}`,
-    `🔁 Sessions: ${fmt(d.sessions)}`,
     `💡 Engagement Rate: ${fmtPercent(d.engagement_rate)}`,
-    `↩️  Bounce Rate: ${fmtPercent(d.bounce_rate)}`,
     `━━━━━━━━━━━━━━━━━━━━`,
   ].join("\n");
 }
